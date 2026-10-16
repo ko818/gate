@@ -95,7 +95,7 @@ EDGE_HOSTS = [
 # 优选 API 地址配置 (支持逗号分隔多个，可配置在 GitHub Action Secret / Env 中)
 OPTIMAL_API = os.environ.get("OPTIMAL_API", "https://cf.090227.xyz/ct?ips=6&port=443")
 
-NODES_URL = os.environ.get("NODES_URL", "https://ko818.github.io/gate/nodes.txt")
+NODES_URL = os.environ.get("NODES_URL", "https://ko818.github.io.github.io/gate/nodes.txt")
 
 # ---------------------------------------------------------------------------
 # 日志
@@ -415,11 +415,28 @@ def build_outputs(results, raw_count, sstp_count, source):
     }
     return data
 
-def build_nodes_text(data, edge_hosts):
+def build_nodes_text(data, edge_hosts, country_group="all"):
     """
     生成纯节点行版本 (无注释): 每行 = 入口地址#名字$sstp://...
+    country_group:
+      all   - 全部国家
+      JP    - 日本
+      KR    - 韩国
+      US    - 美国
+      other - 除日本、韩国、美国外的所有国家
     """
     countries = data["countries"]
+    target_codes = {"JP", "KR", "US"}
+    if country_group in {"JP", "KR", "US"}:
+        countries = {
+            name: grp for name, grp in countries.items()
+            if str(grp.get("code") or "").upper() == country_group
+        }
+    elif country_group == "other":
+        countries = {
+            name: grp for name, grp in countries.items()
+            if str(grp.get("code") or "").upper() not in target_codes
+        }
     edge = edge_hosts
     lines = []
     idx = 0
@@ -459,11 +476,22 @@ def write_outputs(data, edge_hosts):
     with open(html_path, "w", encoding="utf-8") as f:
         f.write(html)
 
-    nodes_path = os.path.join(PUBLIC_DIR, "nodes.txt")
-    with open(nodes_path, "w", encoding="utf-8") as f:
-        f.write(build_nodes_text(data, edge_hosts))
+    # 保留原有全量订阅，同时按国家分组生成独立订阅文件。
+    output_files = {
+        "nodes.txt": "all",
+        "nodes_jp.txt": "JP",
+        "nodes_kr.txt": "KR",
+        "nodes_us.txt": "US",
+        "nodes_other.txt": "other",
+    }
+    nodes_paths = []
+    for filename, country_group in output_files.items():
+        nodes_path = os.path.join(PUBLIC_DIR, filename)
+        with open(nodes_path, "w", encoding="utf-8") as f:
+            f.write(build_nodes_text(data, edge_hosts, country_group))
+        nodes_paths.append(nodes_path)
 
-    return data_path, html_path, nodes_path
+    return data_path, html_path, nodes_paths
 
 # ---------------------------------------------------------------------------
 # main
@@ -511,10 +539,11 @@ def main():
     # 动态拉取 API 并与静态优选域名混合
     edge_hosts = get_combined_edge_hosts()
 
-    data_path, html_path, nodes_path = write_outputs(data, edge_hosts)
+    data_path, html_path, nodes_paths = write_outputs(data, edge_hosts)
     log("WEBSITE", f"生成 {os.path.relpath(data_path, REPO_DIR)}")
     log("WEBSITE", f"生成 {os.path.relpath(html_path, REPO_DIR)}")
-    log("WEBSITE", f"生成 {os.path.relpath(nodes_path, REPO_DIR)}")
+    for nodes_path in nodes_paths:
+        log("WEBSITE", f"生成 {os.path.relpath(nodes_path, REPO_DIR)}")
     log("USAGE", f"自动轮换: 把 {NODES_URL} 填入 edgetunnel 后台「自定义优选IP」框 (一次配置, 之后自动更新)")
     log("WEBSITE", "完成 (GitHub Pages 部署由 workflow 执行)")
 
